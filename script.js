@@ -303,7 +303,13 @@ function openModal(section='morning'){
 
   document.getElementById('new-task-title').value='';
   document.getElementById('new-task-desc').value='';
-  document.getElementById('new-task-deadline').value='';
+  // Pre-fill deadline with today's date/time so users see it and can change it
+  const now = new Date();
+  const hours = section === 'morning' ? 9 : section === 'afternoon' ? 14 : 20;
+  const mins = 0;
+  const defaultDeadline = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hours, mins);
+  document.getElementById('new-task-deadline').value = defaultDeadline.toISOString().slice(0, 16);
+  
   document.getElementById('new-task-section').value=section;
   document.getElementById('new-task-tag').value='work';
   document.getElementById('new-task-prio').value='med';
