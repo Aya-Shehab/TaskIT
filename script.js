@@ -92,6 +92,13 @@ function formatDeadline(deadline){
   if(Number.isNaN(d.getTime())) return '';
   return d.toLocaleString(undefined, {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
 }
+function toDatetimeLocalValue(iso){
+  if(!iso) return '';
+  const d = new Date(iso);
+  if(Number.isNaN(d.getTime())) return '';
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
 
 const upcomingTasks = [
   {day:'Today',date:today,tasks:['Standup','Design review','Report'],colors:['#b5d4f4','#c0dd97','#fac775'],today:true},
@@ -131,12 +138,36 @@ function tagToEventColor(tag){
 }
 
 function toLocalDateTimeFromSection(section){
-  // default times to match "Today" sections
   const hm = section === 'morning' ? [9,0] : section === 'afternoon' ? [14,0] : [20,0];
   const d = new Date();
   d.setSeconds(0,0);
   d.setHours(hm[0], hm[1], 0, 0);
   return d;
+}
+
+function parseTimeStringToToday(timeStr){
+  const m = String(timeStr || '').match(/(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
+  if(!m) return null;
+  let h = parseInt(m[1], 10);
+  const min = parseInt(m[2], 10);
+  const ap = (m[3] || '').toUpperCase();
+  if(ap === 'PM' && h !== 12) h += 12;
+  if(ap === 'AM' && h === 12) h = 0;
+  const d = new Date();
+  d.setSeconds(0, 0);
+  d.setHours(h, min, 0, 0);
+  return d;
+}
+
+/** When a task should appear on day / week / month calendars */
+function taskToCalendarStart(task, section){
+  if(task.deadline){
+    const d = new Date(task.deadline);
+    if(!Number.isNaN(d.getTime())) return d;
+  }
+  const fromTime = parseTimeStringToToday(task.time);
+  if(fromTime) return fromTime;
+  return toLocalDateTimeFromSection(section);
 }
 
 function getUnifiedEvents(){
@@ -155,20 +186,38 @@ function getUnifiedEvents(){
     };
   });
 
-  const allTasks = [...tasks.morning, ...tasks.afternoon, ...tasks.evening].map(ensureTaskShape);
-  const taskEvents = allTasks
-    .filter(t => t.deadline)
-    .map(t => ({
-      kind: 'task',
-      title: t.title,
-      start: new Date(t.deadline),
-      durMinutes: 30,
-      color: tagToEventColor(t.tag),
-      done: t.done,
-    }))
-    .filter(e => !Number.isNaN(e.start.getTime()));
+  const taskEvents = [];
+  for(const section of ['morning','afternoon','evening']){
+    for(const raw of tasks[section] || []){
+      const t = ensureTaskShape(raw);
+      const start = taskToCalendarStart(t, section);
+      if(Number.isNaN(start.getTime())) continue;
+      taskEvents.push({
+        kind: 'task',
+        taskId: t.id,
+        title: t.title,
+        start,
+        durMinutes: 30,
+        color: tagToEventColor(t.tag),
+        done: t.done,
+      });
+    }
+  }
 
   return [...base, ...taskEvents];
+}
+
+function syncCalendars(){
+  renderDay();
+  renderWeek();
+  renderMonth();
+}
+
+function eventShowsInHour(ev, hour){
+  const startH = ev.start.getHours();
+  const endTotalMin = ev.start.getMinutes() + (ev.durMinutes || 30);
+  const endH = startH + Math.floor(endTotalMin / 60);
+  return hour >= startH && hour <= endH;
 }
 
 function migrateTasksForCalendar(){
@@ -215,6 +264,7 @@ function switchView(view, el){
   }
   document.getElementById('view-'+view).classList.add('fade-in');
   setTimeout(()=>document.getElementById('view-'+view).classList.remove('fade-in'),300);
+  if(isCalendar) syncCalendars();
 }
 function setCalView(v){
   const navEl=document.querySelector(`[data-view="cal-${v}"]`);
@@ -254,8 +304,7 @@ function renderTasks(){
   }
 
   updateProgress();
-  // Keep calendar in sync whenever tasks list re-renders
-  renderDay();renderWeek();renderMonth();
+  syncCalendars();
 }
 
 function createTaskEl(t,section){
@@ -315,7 +364,6 @@ function toggleTask(id){
   tasks[found.section][found.idx].done = !tasks[found.section][found.idx].done;
   persistState();
   renderTasks();
-  renderDay();renderWeek();renderMonth();
 }
 
 function updateProgress(){
@@ -366,7 +414,7 @@ function openEditModal(id){
 
   document.getElementById('new-task-title').value=t.title;
   document.getElementById('new-task-desc').value=t.description;
-  document.getElementById('new-task-deadline').value=t.deadline ? String(t.deadline).slice(0,16) : '';
+  document.getElementById('new-task-deadline').value=toDatetimeLocalValue(t.deadline);
   document.getElementById('new-task-section').value=found.section;
   document.getElementById('new-task-tag').value=t.tag;
   document.getElementById('new-task-prio').value=t.prio;
@@ -409,7 +457,6 @@ function saveTask(){
   closeModal();
   renderTasks();
   initUpcoming();
-  renderDay();renderWeek();renderMonth();
 }
 
 function deleteTask(){
@@ -421,7 +468,6 @@ function deleteTask(){
   closeModal();
   renderTasks();
   initUpcoming();
-  renderDay();renderWeek();renderMonth();
 }
 
 // ── Upcoming ──────────────────────────────────────────────────────────────
@@ -430,21 +476,31 @@ function initUpcoming(){
   grid.innerHTML='';
   const q = norm(searchQuery);
 
-  upcomingTasks.forEach((d,i)=>{
+  const tagDot = {work:'#b5d4f4',personal:'#cecbf6',health:'#c0dd97',study:'#fac775'};
+  for(let i=0;i<7;i++){
     const date=new Date(today);
     date.setDate(today.getDate()+i);
 
-    const visibleTasks = q ? d.tasks.filter(t => matchesQuery(t)) : d.tasks;
-    if(q && visibleTasks.length === 0) return;
-
+    const items=[];
+    for(const section of ['morning','afternoon','evening']){
+      for(const raw of tasks[section]||[]){
+        const t=ensureTaskShape(raw);
+        const start=taskToCalendarStart(t,section);
+        if(!sameDay(start,date)) continue;
+        if(q && !matchesQuery(t.title) && !matchesQuery(t.tag) && !matchesQuery(t.time)) continue;
+        items.push({title:t.title,color:tagDot[t.tag]||'#ccc'});
+      }
+    }
+    if(q && items.length===0) continue;
+    const dayLabel=i===0?'Today':days[date.getDay()];
     const card=document.createElement('div');
-    card.className='upcoming-card fade-in'+(d.today?' today':'');
+    card.className='upcoming-card fade-in'+(i===0?' today':'');
     card.style.animationDelay=i*0.04+'s';
-    card.innerHTML=`<div class="upcoming-card-day">${d.day.substring(0,3).toUpperCase()}</div>
+    card.innerHTML=`<div class="upcoming-card-day">${dayLabel.substring(0,3).toUpperCase()}</div>
     <div class="upcoming-card-date">${date.getDate()}</div>
-    ${visibleTasks.map((t,j)=>`<div class="upcoming-task"><span class="dot" style="background:${d.colors[j]||'#ccc'}"></span>${t}</div>`).join('')}`;
+    ${items.map(it=>`<div class="upcoming-task"><span class="dot" style="background:${it.color}"></span>${it.title}</div>`).join('')}`;
     grid.appendChild(card);
-  });
+  }
 }
 
 // ── Utility Hub ───────────────────────────────────────────────────────────
@@ -566,7 +622,7 @@ function renderDay(){
   document.getElementById('day-title').textContent=days[currentDay.getDay()]+', '+months[currentDay.getMonth()]+' '+currentDay.getDate()+', '+currentDay.getFullYear();
   const grid=document.getElementById('day-grid');
   grid.innerHTML='';
-  const hours=Array.from({length:14},(_,i)=>i+7);
+  const hours=Array.from({length:15},(_,i)=>i+7);
   const unified = getUnifiedEvents();
   hours.forEach(h=>{
     const timeEl=document.createElement('div');
@@ -577,7 +633,7 @@ function renderDay(){
     cell.className='week-cell';
     cell.style.paddingLeft='4px';
     cell.style.paddingRight='4px';
-    const evs=unified.filter(e=>sameDay(e.start,currentDay)&&e.start.getHours()===h);
+    const evs=unified.filter(e=>sameDay(e.start,currentDay)&&eventShowsInHour(e,h));
     evs.forEach(ev=>{
       const evEl=document.createElement('div');
       evEl.className='week-event '+(ev.color||'event-blue');
@@ -630,7 +686,7 @@ function renderWeek(){
     grid.appendChild(hdr);
   }
   // Time rows
-  const hours=Array.from({length:12},(_,i)=>i+7);
+  const hours=Array.from({length:15},(_,i)=>i+7);
   hours.forEach(h=>{
     const timeEl=document.createElement('div');
     timeEl.className='week-time';
@@ -641,7 +697,7 @@ function renderWeek(){
       date.setDate(startOfWeek.getDate()+d);
       const cell=document.createElement('div');
       cell.className='week-cell';
-      const evs=unified.filter(e=>sameDay(e.start,date)&&e.start.getHours()===h);
+      const evs=unified.filter(e=>sameDay(e.start,date)&&eventShowsInHour(e,h));
       evs.forEach(ev=>{
         const evEl=document.createElement('div');
         evEl.className='week-event '+(ev.color||'event-blue');

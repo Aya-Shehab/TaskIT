@@ -67,11 +67,6 @@ body{font-family:var(--font-sans);background:var(--black);color:var(--white);hei
 .proj-item{display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:8px;cursor:pointer;font-size:12px;color:var(--gray-600);transition:all .12s;margin-bottom:1px}
 .proj-item:hover{background:var(--gray-200)}
 .proj-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
-.sidebar-footer{padding:12px;border-top:1px solid var(--gray-200)}
-.sidebar-upgrade{background:var(--black);color:#fff;border-radius:10px;padding:12px;font-size:11px;line-height:1.5}
-.sidebar-upgrade strong{display:block;font-size:13px;margin-bottom:2px}
-.sidebar-upgrade .btn-upgrade{background:var(--yellow);color:var(--black);border:none;padding:6px 12px;border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;margin-top:8px;display:inline-block}
-
 /* Main content */
 .main{flex:1;display:flex;flex-direction:column;overflow:hidden}
 .topbar{height:var(--nav-h);border-bottom:1px solid var(--gray-200);display:flex;align-items:center;padding:0 24px;gap:12px;flex-shrink:0;background:var(--off-white)}
